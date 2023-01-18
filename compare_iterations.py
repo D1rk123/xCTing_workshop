@@ -4,6 +4,17 @@ import tomosipo as ts
 import ts_algorithms as tsa
 import matplotlib.pyplot as plt
 
+class TrackNagLsResidualCb(tsa.TrackMetricCb):
+        def __init__(self, A, y_reference, l2_regularization, keep_best_x=False, early_stopping_iterations=None):
+            super().__init__(keep_best_x=keep_best_x, early_stopping_iterations=early_stopping_iterations)
+            self._y_reference = y_reference
+            self._A = A
+            self._l2_regularization = l2_regularization
+            
+        def calc_metric(self, x, iteration):
+            squared_residual_error = (self._A(x) - self._y_reference) ** 2
+            return torch.sum(squared_residual_error) + self._l2_regularization * torch.sum(x**2)
+
 def add_poisson_noise(img, photon_count, attenuation_factor=1):
     img = img * attenuation_factor
     opt = dict(dtype=np.float32)
@@ -43,7 +54,7 @@ if __name__ == "__main__":
     
     r_fbp = tsa.fbp(A, y)
     fbp_mse = torch.mean((r_fbp-x)**2)
-
+    
     r_sirt = tsa.sirt(A, y, 100)
     r_nag10 = tsa.nag_ls(A, y, 10)
     r_nag29 = tsa.nag_ls(A, y, 29)
@@ -82,10 +93,15 @@ if __name__ == "__main__":
     nag100_mse_cb = tsa.TrackMseCb(x)
     nag1000_mse_cb = tsa.TrackMseCb(x)
     
-    r_nag_l2_0 = tsa.nag_ls(A, y, 500, l2_regularization=0, callbacks=(nag0_mse_cb, ))
-    r_nag_l2_10 = tsa.nag_ls(A, y, 500, l2_regularization=10, callbacks=(nag10_mse_cb, ))
-    r_nag_l2_100 = tsa.nag_ls(A, y, 500, l2_regularization=100, callbacks=(nag100_mse_cb, ))
-    r_nag_l2_1000 = tsa.nag_ls(A, y, 500, l2_regularization=1000, callbacks=(nag1000_mse_cb, ))
+    residual0_cb = TrackNagLsResidualCb(A, y, 0)
+    residual10_cb = TrackNagLsResidualCb(A, y, 10)
+    residual100_cb = TrackNagLsResidualCb(A, y, 100)
+    residual1000_cb = TrackNagLsResidualCb(A, y, 1000)
+    
+    r_nag_l2_0 = tsa.nag_ls(A, y, 500, l2_regularization=0, callbacks=(nag0_mse_cb, residual0_cb))
+    r_nag_l2_10 = tsa.nag_ls(A, y, 500, l2_regularization=10, callbacks=(nag10_mse_cb, residual10_cb))
+    r_nag_l2_100 = tsa.nag_ls(A, y, 500, l2_regularization=100, callbacks=(nag100_mse_cb, residual100_cb))
+    r_nag_l2_1000 = tsa.nag_ls(A, y, 500, l2_regularization=1000, callbacks=(nag1000_mse_cb, residual1000_cb))
     
     plt.figure(figsize=(12, 7))
     plt.subplot(231); plt.imshow(x[0, ...].numpy(), vmin=-0.05, vmax=1.05); plt.title("original image"); plt.colorbar()
@@ -109,6 +125,20 @@ if __name__ == "__main__":
     plt.ylabel("MSE between reconstructed and original image")
     plt.legend()
     plt.title("Reconstruction error with different l2 regularization levels")
+    plt.tight_layout()
+    plt.show()
+    
+    plt.figure(figsize=(8, 6))
+    plt.plot(np.arange(1,501), residual0_cb.metric_log, label="nag_ls ($\lambda=0$)")
+    plt.plot(np.arange(1,501), residual10_cb.metric_log, label="nag_ls ($\lambda=10$)")
+    plt.plot(np.arange(1,501), residual100_cb.metric_log, label="nag_ls ($\lambda=100$)")
+    plt.plot(np.arange(1,501), residual1000_cb.metric_log, label="nag_ls ($\lambda=1000$)")
+    plt.xscale("log")
+    plt.yscale("log")
+    plt.xlabel("Number of iterations")
+    plt.ylabel("residual")
+    plt.legend()
+    plt.title("Residual with different l2 regularization levels")
     plt.tight_layout()
     plt.show()
     
